@@ -1,0 +1,80 @@
+{
+  "name": "fieldbase",
+  "version": "1.0.0",
+  "description": "Field operations and business management platform for trade contractors",
+  "main": "src/main/index.js",
+  "scripts": {
+    "start": "node launch.js",
+    "dev": "concurrently --prefix none \"npm run dev:react\" \"npm run dev:electron\"",
+    "dev:react": "vite --logLevel error",
+    "dev:electron": "wait-on http://localhost:5173 && electron .",
+    "build": "vite build && electron-builder --win",
+    "build:mac": "vite build && electron-builder --mac",
+    "build:react": "vite build",
+    "rebuild-native": "electron-rebuild",
+    "build:electron": "electron-builder --win --publish always"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.108.1",
+    "better-sqlite3": "^12.10.0",
+    "electron-updater": "^6.8.9",
+    "node-machine-id": "^1.1.12",
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^3.6.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "concurrently": "^8.2.2",
+    "electron": "^29.4.6",
+    "electron-builder": "^24.13.3",
+    "png2icons": "^2.0.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "sharp": "^0.35.1",
+    "vite": "^5.1.6",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.fieldbase.app",
+    "productName": "Fieldbase",
+    "copyright": "Copyright 2026",
+    "files": [
+      "dist/**/*",
+      "src/main/**/*",
+      "src/preload/**/*",
+      "node_modules/**/*"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
+    "publish": {
+      "provider": "github",
+      "owner": "weslinpena1414",
+      "repo": "fieldbase-desktop"
+    },
+    "win": {
+      "icon": "public/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "public/icon.icns",
+      "category": "public.app-category.business"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Fieldbase"
+    }
+  }
+}

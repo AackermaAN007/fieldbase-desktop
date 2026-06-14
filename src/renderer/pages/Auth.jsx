@@ -38,12 +38,8 @@ export default function Auth({ onAuth }) {
     setLoading(true)
     const result = await window.electron.auth.google()
     setLoading(false)
-    if (result?.error === 'not_configured') {
-      setError('Google Sign In: add your OAuth credentials in Settings → Integrations.')
-      return
-    }
     if (result?.error) { setError(result.error); return }
-    onAuth(result.account || result)
+    onAuth(result.account)
   }
 
   return (

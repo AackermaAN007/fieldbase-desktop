@@ -799,79 +799,96 @@ ipcMain.handle('auth:logout', async () => {
 let _googleAuthServer = null // track active server to prevent duplicates
 
 ipcMain.handle('auth:google', async () => {
-  const clientId = getSetting('google_oauth_client_id', '')
-  const clientSecret = getSetting('google_oauth_client_secret', '')
-  if (!clientId || !clientSecret) return { error: 'not_configured' }
+  const { SUPABASE_URL, SUPABASE_ANON_KEY } = cloud
 
-  // Close any lingering server from a previous cancelled attempt
   if (_googleAuthServer) { try { _googleAuthServer.close() } catch {} _googleAuthServer = null }
 
-  const verifier = randomBytes(32).toString('base64url')
-  const challenge = createHash('sha256').update(verifier).digest('base64url')
+  let resolveTokens, rejectTokens
+  const tokenPromise = new Promise((res, rej) => { resolveTokens = res; rejectTokens = rej })
 
-  let resolveCode, rejectCode
-  const codePromise = new Promise((res, rej) => { resolveCode = res; rejectCode = rej })
-
+  // Two-step local server: root page reads the hash fragment (tokens live there),
+  // then forwards them as query params to /callback which the main handler reads.
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://localhost')
-    const code = url.searchParams.get('code')
-    const error = url.searchParams.get('error')
-    res.writeHead(200, { 'Content-Type': 'text/html' })
-    res.end(`<html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0a1628;color:#dce8f0">
-      <div style="font-size:28px;font-weight:800;margin-bottom:16px"><span style="color:#FF6B35">Field</span><span style="font-weight:300">base</span></div>
-      <div style="font-size:48px;margin-bottom:16px">${error ? '✗' : '✓'}</div>
-      <h2 style="color:${error ? '#ef4444' : '#FF6B35'}">${error ? 'Sign in cancelled' : 'Signed in successfully!'}</h2>
-      <p style="color:#8aadcc">You can close this tab and return to the app.</p>
-      <script>window.close()</script>
-    </body></html>`)
-    server.close()
-    _googleAuthServer = null
-    if (error) rejectCode(new Error(error))
-    else resolveCode(code)
-  })
-  _googleAuthServer = server
 
+    if (url.pathname === '/callback') {
+      const access_token = url.searchParams.get('access_token')
+      const refresh_token = url.searchParams.get('refresh_token')
+      const error = url.searchParams.get('error')
+      res.writeHead(200, { 'Content-Type': 'text/html' })
+      res.end(`<html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0a1628;color:#dce8f0">
+        <div style="font-size:28px;font-weight:800;margin-bottom:16px"><span style="color:#FF6B35">Field</span><span style="font-weight:300">base</span></div>
+        <div style="font-size:48px;margin-bottom:16px">${error ? '✗' : '✓'}</div>
+        <h2 style="color:${error ? '#ef4444' : '#FF6B35'}">${error ? 'Sign in cancelled' : 'Signed in with Google!'}</h2>
+        <p style="color:#8aadcc">You can close this tab and return to the app.</p>
+        <script>window.close()</script>
+      </body></html>`)
+      server.close()
+      _googleAuthServer = null
+      if (error) rejectTokens(new Error(error))
+      else resolveTokens({ access_token, refresh_token })
+      return
+    }
+
+    // Root: reads hash fragment and forwards tokens to /callback as query params
+    res.writeHead(200, { 'Content-Type': 'text/html' })
+    res.end(`<html><head><title>Fieldbase Sign In</title></head><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0a1628;color:#dce8f0">
+      <div style="font-size:28px;font-weight:800;margin-bottom:16px"><span style="color:#FF6B35">Field</span><span style="font-weight:300">base</span></div>
+      <p style="color:#8aadcc">Completing sign in…</p>
+      <script>
+        const hash = window.location.hash.substring(1)
+        const params = new URLSearchParams(hash)
+        const access_token = params.get('access_token') || ''
+        const refresh_token = params.get('refresh_token') || ''
+        const error = params.get('error') || params.get('error_description') || ''
+        window.location.href = '/callback?' + new URLSearchParams({ access_token, refresh_token, error }).toString()
+      </script>
+    </body></html>`)
+  })
+
+  _googleAuthServer = server
   await new Promise((resolve, reject) => server.listen(0, '127.0.0.1', err => err ? reject(err) : resolve()))
   const port = server.address().port
-  const redirectUri = `http://127.0.0.1:${port}`
+  const redirectTo = `http://127.0.0.1:${port}`
 
-  const params = new URLSearchParams({
-    client_id: clientId,
-    redirect_uri: redirectUri,
-    response_type: 'code',
-    scope: 'openid email profile',
-    code_challenge: challenge,
-    code_challenge_method: 'S256',
-    access_type: 'offline',
-    prompt: 'select_account',
-  })
-
-  shell.openExternal(`https://accounts.google.com/o/oauth2/v2/auth?${params}`)
+  // Supabase handles the Google OAuth exchange — no client credentials needed in the app
+  shell.openExternal(`${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`)
 
   try {
-    const code = await Promise.race([
-      codePromise,
-      new Promise((_, rej) => setTimeout(() => { try { server.close() } catch {} _googleAuthServer = null; rej(new Error('timeout')) }, 120000))
+    const { access_token, refresh_token } = await Promise.race([
+      tokenPromise,
+      new Promise((_, rej) => setTimeout(() => {
+        try { server.close() } catch {} _googleAuthServer = null
+        rej(new Error('timeout'))
+      }, 120000))
     ])
 
-    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        code, client_id: clientId, client_secret: clientSecret,
-        redirect_uri: redirectUri, grant_type: 'authorization_code', code_verifier: verifier,
-      })
-    })
-    const tokens = await tokenRes.json()
-    if (!tokenRes.ok) return { error: tokens.error_description || 'Token exchange failed' }
+    if (!access_token) return { error: 'No access token received.' }
 
-    const profileRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-      headers: { Authorization: `Bearer ${tokens.access_token}` }
+    cloud.setSession({ access_token, refresh_token, user: null })
+
+    const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { 'apikey': SUPABASE_ANON_KEY, 'Authorization': `Bearer ${access_token}` }
     })
-    const profile = await profileRes.json()
-    return { success: true, name: profile.name, email: profile.email, picture: profile.picture, provider: 'google' }
+    const userData = await userRes.json()
+    if (!userData?.id) return { error: 'Could not retrieve user info from Google.' }
+
+    cloud.setSession({ access_token, refresh_token, user: userData })
+    setSetting('cloud_refresh_token', refresh_token || '')
+    setSetting('cloud_user_id', userData.id || '')
+    setSetting('cloud_email', userData.email || '')
+
+    const name = userData.user_metadata?.full_name || userData.user_metadata?.name || userData.email?.split('@')[0] || 'Google User'
+    const accounts = JSON.parse(getSetting('accounts', '[]'))
+    if (!accounts.find(a => a.email?.toLowerCase() === userData.email?.toLowerCase())) {
+      accounts.push({ name, email: userData.email, cloud_id: userData.id, provider: 'google', created_at: new Date().toISOString() })
+      setSetting('accounts', JSON.stringify(accounts))
+    }
+
+    return { success: true, account: { name, email: userData.email, cloud_id: userData.id, provider: 'google' } }
   } catch (e) {
     try { server.close() } catch {}
+    _googleAuthServer = null
     return { error: e.message === 'timeout' ? 'Sign in timed out. Please try again.' : e.message }
   }
 })

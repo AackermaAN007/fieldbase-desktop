@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 
-const STRIPE_CHECKOUT_URL = 'YOUR_STRIPE_CHECKOUT_LINK'
+const STRIPE_CHECKOUT_URL = 'https://buy.stripe.com/test_7sYcN69IEb8AbUf1QrcMM00'
 
 export default function LicenseBanner({ onActivated }) {
   const [licenseStatus, setLicenseStatus] = useState(null)

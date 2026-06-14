@@ -569,7 +569,7 @@ export default function Settings({ settings, onSettingsChange }) {
 
 // ── Subscription panel ─────────────────────────────────────────────────────────
 function SubscriptionPanel({ status, onRefresh }) {
-  const STRIPE_PORTAL = 'YOUR_STRIPE_CHECKOUT_LINK'
+  const STRIPE_PORTAL = 'https://buy.stripe.com/test_7sYcN69IEb8AbUf1QrcMM00'
 
   const daysLeft = status.days_left
   const expiryDate = status.expires_at ? new Date(status.expires_at).toLocaleDateString() : null

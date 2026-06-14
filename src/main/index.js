@@ -94,6 +94,7 @@ function initDatabase() {
       site_zip TEXT,
       status TEXT DEFAULT 'active',
       description TEXT,
+      assigned_to TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       completed_at TEXT
     );
@@ -237,6 +238,9 @@ function initDatabase() {
   // Migrations for existing databases
   const invCols = db.prepare("PRAGMA table_info(invoices)").all().map(c => c.name)
   if (!invCols.includes('last_reminder_at')) db.exec("ALTER TABLE invoices ADD COLUMN last_reminder_at TEXT")
+
+  const jobCols = db.prepare("PRAGMA table_info(jobs)").all().map(c => c.name)
+  if (!jobCols.includes('assigned_to')) db.exec("ALTER TABLE jobs ADD COLUMN assigned_to TEXT")
 
   // cloud_id columns for Supabase sync
   const tables = ['clients', 'jobs', 'invoices', 'expenses', 'payments', 'schedules', 'change_orders', 'materials_library']

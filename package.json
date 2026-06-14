@@ -12,7 +12,7 @@
     "build:mac": "vite build && electron-builder --mac",
     "build:react": "vite build",
     "rebuild-native": "electron-rebuild",
-    "build:electron": "electron-builder --win --publish always"
+    "build:electron": "electron-builder --win --publish never"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.1",

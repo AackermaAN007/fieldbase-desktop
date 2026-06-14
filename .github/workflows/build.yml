@@ -33,5 +33,5 @@ jobs:
       - name: Upload to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.exe
+          files: dist/*.exe
           token: ${{ secrets.GH_TOKEN }}

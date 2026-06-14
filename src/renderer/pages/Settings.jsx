@@ -549,14 +549,17 @@ export default function Settings({ settings, onSettingsChange }) {
             <SectionWrap desc="All your data is stored locally on this computer. Back up regularly.">
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
                 <button className="btn btn-secondary" onClick={backup}>📦 Export Database Backup</button>
+                <button className="btn btn-secondary" onClick={() => window.electron.log?.openFolder()}>📋 Open Error Logs</button>
               </div>
               <InfoBox>
                 <strong>Where is my data?</strong><br />
                 <code style={{ fontSize: 12, background: 'var(--surface)', padding: '2px 8px', borderRadius: 4, display: 'inline-block', marginTop: 6 }}>
-                  %APPDATA%\invoice-app\invoices.db
+                  %APPDATA%\Fieldbase\fieldbase.db
                 </code>
                 <br /><br />
                 Back up before Windows updates or when moving to a new computer. To restore: close the app, replace the .db file, and reopen.
+                <br /><br />
+                <strong>Error logs</strong> are saved to <code style={{ fontSize: 12, background: 'var(--surface)', padding: '2px 8px', borderRadius: 4 }}>%APPDATA%\Fieldbase\logs\fieldbase.log</code> — click "Open Error Logs" to view them.
               </InfoBox>
             </SectionWrap>
           )}

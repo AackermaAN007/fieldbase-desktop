@@ -1,16 +1,52 @@
 process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = '1'
 
-// Prevent any uncaught error from crashing the main process entirely
-process.on('uncaughtException', (err) => {
-  console.error('[Fieldbase] Uncaught exception:', err.message)
-})
-process.on('unhandledRejection', (reason) => {
-  console.error('[Fieldbase] Unhandled rejection:', reason)
-})
-
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
+
+// ─── File logger ─────────────────────────────────────────────────────────────
+// Writes timestamped entries to AppData\Roaming\Fieldbase\logs\fieldbase.log
+// Rotates the file when it exceeds 5 MB so it never grows out of control.
+const LOG_MAX_BYTES = 5 * 1024 * 1024 // 5 MB
+let _logPath = null
+
+function getLogPath() {
+  if (_logPath) return _logPath
+  try {
+    const dir = path.join(app.getPath('appData'), 'Fieldbase', 'logs')
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+    _logPath = path.join(dir, 'fieldbase.log')
+  } catch {}
+  return _logPath
+}
+
+function writeLog(level, ...args) {
+  const line = `[${new Date().toISOString()}] [${level}] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`
+  console[level === 'ERROR' ? 'error' : 'log'](line.trim())
+  try {
+    const p = getLogPath()
+    if (!p) return
+    // Rotate if too large
+    if (fs.existsSync(p) && fs.statSync(p).size > LOG_MAX_BYTES) {
+      fs.renameSync(p, p.replace('.log', '.old.log'))
+    }
+    fs.appendFileSync(p, line)
+  } catch {}
+}
+
+const log = {
+  info:  (...a) => writeLog('INFO',  ...a),
+  warn:  (...a) => writeLog('WARN',  ...a),
+  error: (...a) => writeLog('ERROR', ...a),
+}
+
+// Catch any unhandled error and write it to the log file before the process exits
+process.on('uncaughtException', (err) => {
+  log.error('Uncaught exception:', err.message, err.stack)
+})
+process.on('unhandledRejection', (reason) => {
+  log.error('Unhandled rejection:', reason instanceof Error ? reason.stack : reason)
+})
 const http = require('http')
 const { randomBytes, createHash } = require('crypto')
 const { machineIdSync } = require('node-machine-id')
@@ -331,12 +367,35 @@ ipcMain.handle('update:install', () => {
 })
 
 app.whenReady().then(() => {
-  initDatabase()
-  migrateEncryption()
-  createWindow()
+  log.info('App starting — version', app.getVersion(), 'packaged:', app.isPackaged)
+  try {
+    initDatabase()
+    log.info('Database initialized at', getDbPath())
+  } catch (err) {
+    log.error('Database init failed:', err.message, err.stack)
+    dialog.showErrorBox('Fieldbase — Startup Error', `Failed to open database:\n\n${err.message}\n\nLog: ${getLogPath()}`)
+    app.quit()
+    return
+  }
+  try {
+    migrateEncryption()
+  } catch (err) {
+    log.warn('Encryption migration error (non-fatal):', err.message)
+  }
+  try {
+    createWindow()
+    log.info('Window created')
+  } catch (err) {
+    log.error('createWindow failed:', err.message, err.stack)
+    dialog.showErrorBox('Fieldbase — Startup Error', `Failed to create window:\n\n${err.message}\n\nLog: ${getLogPath()}`)
+    app.quit()
+    return
+  }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+}).catch(err => {
+  log.error('app.whenReady failed:', err.message, err.stack)
 })
 
 app.on('window-all-closed', () => {
@@ -665,6 +724,13 @@ ipcMain.handle('license:check', async () => {
 
   if (daysLeft < 0) return { valid: false, reason: 'expired', expires_at: expiresAt }
   return { valid: true, plan: 'monthly', expires_at: expiresAt, days_left: daysLeft }
+})
+
+ipcMain.handle('log:getPath', () => getLogPath())
+ipcMain.handle('log:error', (_, msg) => log.error('[Renderer]', msg))
+ipcMain.handle('log:openFolder', () => {
+  const p = getLogPath()
+  if (p) shell.showItemInFolder(p)
 })
 
 ipcMain.handle('shell:openExternal', (_, url) => {

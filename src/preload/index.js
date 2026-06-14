@@ -120,6 +120,11 @@ contextBridge.exposeInMainWorld('electron', {
   shell: {
     openExternal: (url) => api('shell:openExternal', url),
   },
+  log: {
+    getPath: () => api('log:getPath'),
+    error: (msg) => api('log:error', msg),
+    openFolder: () => api('log:openFolder'),
+  },
   updater: {
     install: () => api('update:install'),
   },

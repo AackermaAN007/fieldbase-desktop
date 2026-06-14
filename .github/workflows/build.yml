@@ -40,3 +40,36 @@ jobs:
         with:
           files: dist/*.exe
           token: ${{ secrets.GH_TOKEN }}
+
+  build-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Rebuild native modules for Electron
+        run: npx @electron/rebuild -f -w better-sqlite3
+
+      - name: Build React
+        run: npm run build:react
+        env:
+          NODE_ENV: production
+
+      - name: Build Electron DMG
+        run: npx electron-builder --mac --publish never
+        env:
+          NODE_ENV: production
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.dmg
+          token: ${{ secrets.GH_TOKEN }}

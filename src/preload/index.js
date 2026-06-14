@@ -103,7 +103,6 @@ contextBridge.exposeInMainWorld('electron', {
     restoreSession: () => api('auth:restoreSession'),
     logout: () => api('auth:logout'),
     google: () => api('auth:google'),
-    apple: () => api('auth:apple'),
   },
   mobile: {
     generateToken: (data) => api('mobile:generateToken', data),

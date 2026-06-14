@@ -52,7 +52,7 @@
     ],
     "publish": {
       "provider": "github",
-      "owner": "weslinpena1414",
+      "owner": "AackermaAN007",
       "repo": "fieldbase-desktop"
     },
     "win": {

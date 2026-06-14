@@ -301,7 +301,7 @@ function createWindow() {
   mainWindow.on('move', saveWinState)
 
   mainWindow.webContents.on('did-fail-load', (_, code, desc) => {
-    console.error('[Fieldbase] Page failed to load:', code, desc)
+    log.error('[Fieldbase] Page failed to load:', code, desc)
   })
 }
 
@@ -318,7 +318,7 @@ function migrateEncryption() {
     })
     migrate()
   } catch (e) {
-    console.error('Encryption migration failed:', e.message)
+    log.error('Encryption migration failed:', e.message)
     // Non-fatal: app still works, data just unencrypted until next launch
   }
 }
@@ -876,107 +876,6 @@ ipcMain.handle('auth:google', async () => {
   }
 })
 
-// ─── Auth: Apple Sign In (via Supabase OAuth) ─────────────────────────────────
-let _appleAuthServer = null
-
-ipcMain.handle('auth:apple', async () => {
-  const { SUPABASE_URL } = cloud
-
-  if (_appleAuthServer) { try { _appleAuthServer.close() } catch {} _appleAuthServer = null }
-
-  let resolveTokens, rejectTokens
-  const tokenPromise = new Promise((res, rej) => { resolveTokens = res; rejectTokens = rej })
-
-  // Local server: serves an HTML page that reads the hash fragment (access_token lives there)
-  const server = http.createServer((req, res) => {
-    const url = new URL(req.url, 'http://localhost')
-
-    if (url.pathname === '/callback') {
-      // Tokens forwarded from the hash-reading page via query params
-      const access_token = url.searchParams.get('access_token')
-      const refresh_token = url.searchParams.get('refresh_token')
-      const error = url.searchParams.get('error')
-      res.writeHead(200, { 'Content-Type': 'text/html' })
-      res.end(`<html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0a1628;color:#dce8f0">
-        <div style="font-size:28px;font-weight:800;margin-bottom:16px"><span style="color:#FF6B35">Field</span><span style="font-weight:300">base</span></div>
-        <div style="font-size:48px;margin-bottom:16px">${error ? '✗' : '✓'}</div>
-        <h2 style="color:${error ? '#ef4444' : '#FF6B35'}">${error ? 'Sign in cancelled' : 'Signed in with Apple!'}</h2>
-        <p style="color:#8aadcc">You can close this tab and return to the app.</p>
-        <script>window.close()</script>
-      </body></html>`)
-      server.close()
-      _appleAuthServer = null
-      if (error) rejectTokens(new Error(error))
-      else resolveTokens({ access_token, refresh_token })
-      return
-    }
-
-    // Root: reads hash fragment and forwards to /callback
-    res.writeHead(200, { 'Content-Type': 'text/html' })
-    res.end(`<html><head><title>Fieldbase Apple Sign In</title></head><body style="font-family:sans-serif;text-align:center;padding:60px;background:#0a1628;color:#dce8f0">
-      <div style="font-size:28px;font-weight:800;margin-bottom:16px"><span style="color:#FF6B35">Field</span><span style="font-weight:300">base</span></div>
-      <p style="color:#8aadcc">Completing sign in…</p>
-      <script>
-        const hash = window.location.hash.substring(1)
-        const params = new URLSearchParams(hash)
-        const access_token = params.get('access_token')
-        const refresh_token = params.get('refresh_token') || ''
-        const error = params.get('error') || params.get('error_description')
-        const qs = new URLSearchParams({ access_token: access_token||'', refresh_token, error: error||'' })
-        window.location.href = '/callback?' + qs.toString()
-      </script>
-    </body></html>`)
-  })
-
-  _appleAuthServer = server
-  await new Promise((resolve, reject) => server.listen(0, '127.0.0.1', err => err ? reject(err) : resolve()))
-  const port = server.address().port
-  const redirectTo = `http://127.0.0.1:${port}`
-
-  const oauthUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=apple&redirect_to=${encodeURIComponent(redirectTo)}`
-  shell.openExternal(oauthUrl)
-
-  try {
-    const { access_token, refresh_token } = await Promise.race([
-      tokenPromise,
-      new Promise((_, rej) => setTimeout(() => {
-        try { server.close() } catch {} _appleAuthServer = null
-        rej(new Error('timeout'))
-      }, 120000))
-    ])
-
-    if (!access_token) return { error: 'No access token received from Apple.' }
-
-    // Set session in cloud module
-    cloud.setSession({ access_token, refresh_token, user: null })
-
-    // Get user info from Supabase
-    const userRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-      headers: { 'apikey': cloud.SUPABASE_ANON_KEY, 'Authorization': `Bearer ${access_token}` }
-    })
-    const userData = await userRes.json()
-    if (!userData?.id) return { error: 'Could not retrieve user info.' }
-
-    cloud.setSession({ access_token, refresh_token, user: userData })
-    setSetting('cloud_refresh_token', refresh_token || '')
-    setSetting('cloud_user_id', userData.id || '')
-    setSetting('cloud_email', userData.email || '')
-
-    const name = userData.user_metadata?.full_name || userData.user_metadata?.name || userData.email?.split('@')[0] || 'Apple User'
-    const accounts = JSON.parse(getSetting('accounts', '[]'))
-    if (!accounts.find(a => a.email?.toLowerCase() === userData.email?.toLowerCase())) {
-      accounts.push({ name, email: userData.email, cloud_id: userData.id, provider: 'apple', created_at: new Date().toISOString() })
-      setSetting('accounts', JSON.stringify(accounts))
-    }
-
-    return { success: true, account: { name, email: userData.email, cloud_id: userData.id, provider: 'apple' } }
-  } catch (e) {
-    try { server.close() } catch {}
-    _appleAuthServer = null
-    return { error: e.message === 'timeout' ? 'Sign in timed out. Please try again.' : e.message }
-  }
-})
-
 // ─── Mobile QR auth ──────────────────────────────────────────────────────────
 ipcMain.handle('mobile:generateToken', async (_, { account }) => {
   const token = randomBytes(24).toString('base64url')
@@ -1003,7 +902,7 @@ ipcMain.handle('mobile:generateToken', async (_, { account }) => {
     })
     snapshot.recent_jobs = db.prepare("SELECT j.id, j.title, j.status, c.name as client_name, j.site_address, j.site_city FROM jobs j LEFT JOIN clients c ON c.id=j.client_id WHERE j.status='active' ORDER BY j.created_at DESC LIMIT 10").all()
   } catch (e) {
-    console.error('Snapshot build failed:', e.message)
+    log.error('Snapshot build failed:', e.message)
   }
 
   // Generate QR first — don't let Supabase failure block this
@@ -1038,10 +937,10 @@ ipcMain.handle('mobile:generateToken', async (_, { account }) => {
     })
     if (!res.ok) {
       const err = await res.text()
-      console.error('Mobile token insert failed:', res.status, err)
+      log.error('Mobile token insert failed:', res.status, err)
     }
   } catch (e) {
-    console.error('Mobile token push failed:', e.message)
+    log.error('Mobile token push failed:', e.message)
   }
 
   return { dataUrl, token, expiresAt, url }
@@ -1672,7 +1571,7 @@ ipcMain.handle('team:get', async () => {
     team.members = await mRes.json() || []
     return team
   } catch (e) {
-    console.error('team:get error', e.message)
+    log.error('team:get error', e.message)
     return null
   }
 })

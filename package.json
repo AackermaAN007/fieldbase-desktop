@@ -42,11 +42,13 @@
       "dist/**/*",
       "src/main/**/*",
       "src/preload/**/*",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "public/**/*"
     ],
     "asar": true,
     "asarUnpack": [
-      "node_modules/better-sqlite3/**/*"
+      "node_modules/better-sqlite3/**/*",
+      "public/**/*"
     ],
     "publish": {
       "provider": "github",

@@ -3,50 +3,15 @@ process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = '1'
 const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron')
 const path = require('path')
 const fs = require('fs')
+const log = require('./logger')
 
-// ─── File logger ─────────────────────────────────────────────────────────────
-// Writes timestamped entries to AppData\Roaming\Fieldbase\logs\fieldbase.log
-// Rotates the file when it exceeds 5 MB so it never grows out of control.
-const LOG_MAX_BYTES = 5 * 1024 * 1024 // 5 MB
-let _logPath = null
-
-function getLogPath() {
-  if (_logPath) return _logPath
-  try {
-    const dir = path.join(app.getPath('appData'), 'Fieldbase', 'logs')
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
-    _logPath = path.join(dir, 'fieldbase.log')
-  } catch {}
-  return _logPath
-}
-
-function writeLog(level, ...args) {
-  const line = `[${new Date().toISOString()}] [${level}] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ')}\n`
-  console[level === 'ERROR' ? 'error' : 'log'](line.trim())
-  try {
-    const p = getLogPath()
-    if (!p) return
-    // Rotate if too large
-    if (fs.existsSync(p) && fs.statSync(p).size > LOG_MAX_BYTES) {
-      fs.renameSync(p, p.replace('.log', '.old.log'))
-    }
-    fs.appendFileSync(p, line)
-  } catch {}
-}
-
-const log = {
-  info:  (...a) => writeLog('INFO',  ...a),
-  warn:  (...a) => writeLog('WARN',  ...a),
-  error: (...a) => writeLog('ERROR', ...a),
-}
-
-// Catch any unhandled error and write it to the log file before the process exits
 process.on('uncaughtException', (err) => {
   log.error('Uncaught exception:', err.message, err.stack)
 })
 process.on('unhandledRejection', (reason) => {
-  log.error('Unhandled rejection:', reason instanceof Error ? reason.stack : reason)
+  log.error('Unhandled rejection:', reason instanceof Error ? reason.stack : String(reason))
 })
+
 const http = require('http')
 const { randomBytes, createHash } = require('crypto')
 const { machineIdSync } = require('node-machine-id')
@@ -287,9 +252,13 @@ function initDatabase() {
 }
 
 function createWindow() {
+  // When packaged, public/ is in app.asar.unpacked — use that path so the OS can read it
+  const publicDir = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'public')
+    : path.join(__dirname, '../../public')
   const iconFile = process.platform === 'darwin'
-    ? path.join(__dirname, '../../public/icon.icns')
-    : path.join(__dirname, '../../public/icon.ico')
+    ? path.join(publicDir, 'icon.icns')
+    : path.join(publicDir, 'icon.ico')
 
   // Restore last window size/position
   const winState = getSetting('window_state', null)
@@ -373,7 +342,7 @@ app.whenReady().then(() => {
     log.info('Database initialized at', getDbPath())
   } catch (err) {
     log.error('Database init failed:', err.message, err.stack)
-    dialog.showErrorBox('Fieldbase — Startup Error', `Failed to open database:\n\n${err.message}\n\nLog: ${getLogPath()}`)
+    dialog.showErrorBox('Fieldbase — Startup Error', `Failed to open database:\n\n${err.message}\n\nLog: ${log.getPath()}`)
     app.quit()
     return
   }
@@ -387,7 +356,7 @@ app.whenReady().then(() => {
     log.info('Window created')
   } catch (err) {
     log.error('createWindow failed:', err.message, err.stack)
-    dialog.showErrorBox('Fieldbase — Startup Error', `Failed to create window:\n\n${err.message}\n\nLog: ${getLogPath()}`)
+    dialog.showErrorBox('Fieldbase — Startup Error', `Failed to create window:\n\n${err.message}\n\nLog: ${log.getPath()}`)
     app.quit()
     return
   }
@@ -403,7 +372,15 @@ app.on('window-all-closed', () => {
 })
 
 app.on('before-quit', () => {
-  try { if (db) db.close() } catch {}
+  try {
+    if (db) {
+      db.pragma('wal_checkpoint(TRUNCATE)') // flush WAL to main DB before closing
+      db.close()
+      log.info('Database closed and WAL checkpointed')
+    }
+  } catch (err) {
+    log.error('Error closing database:', err.message)
+  }
 })
 
 // ─── Settings ────────────────────────────────────────────────────────────────
@@ -726,10 +703,10 @@ ipcMain.handle('license:check', async () => {
   return { valid: true, plan: 'monthly', expires_at: expiresAt, days_left: daysLeft }
 })
 
-ipcMain.handle('log:getPath', () => getLogPath())
+ipcMain.handle('log:getPath', () => log.getPath())
 ipcMain.handle('log:error', (_, msg) => log.error('[Renderer]', msg))
 ipcMain.handle('log:openFolder', () => {
-  const p = getLogPath()
+  const p = log.getPath()
   if (p) shell.showItemInFolder(p)
 })
 

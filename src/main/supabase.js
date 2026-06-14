@@ -19,6 +19,8 @@ function authHeaders() {
 
 // ── REST helpers ─────────────────────────────────────────────────────────────
 
+const log = require('./logger')
+
 async function sbFetch(path, options = {}) {
   const headers = authHeaders()
   if (!headers) return null
@@ -26,13 +28,13 @@ async function sbFetch(path, options = {}) {
     const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...options, headers: { ...headers, ...(options.headers || {}) } })
     if (!res.ok) {
       const err = await res.text()
-      console.error(`[cloud] ${options.method || 'GET'} ${path} → ${res.status}:`, err)
+      log.warn(`[cloud] ${options.method || 'GET'} ${path} → ${res.status}: ${err}`)
       return null
     }
     const text = await res.text()
     return text ? JSON.parse(text) : null
   } catch (e) {
-    console.error('[cloud] fetch error:', e.message)
+    log.warn(`[cloud] fetch error: ${e.message}`)
     return null
   }
 }

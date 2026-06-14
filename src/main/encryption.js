@@ -4,10 +4,13 @@ const { machineIdSync } = require('node-machine-id')
 const ENC_PREFIX = 'ENC:'
 const APP_SECRET = 'fieldbase-secure-vault-2026'
 
-// Key is tied to this specific machine — stolen file is useless on another PC
+// Cached once at startup — machineIdSync() is a blocking disk/registry read
+let _key = null
 function getKey() {
+  if (_key) return _key
   const machineId = machineIdSync()
-  return createHash('sha256').update(machineId + APP_SECRET).digest()
+  _key = createHash('sha256').update(machineId + APP_SECRET).digest()
+  return _key
 }
 
 function encrypt(value) {

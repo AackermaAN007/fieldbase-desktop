@@ -20,6 +20,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Rebuild native modules for Electron
+        run: npx @electron/rebuild -f -w better-sqlite3
+        env:
+          npm_config_msvs_version: '2022'
+
       - name: Build React
         run: npm run build:react
         env:
